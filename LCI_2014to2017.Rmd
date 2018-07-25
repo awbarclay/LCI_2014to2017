@@ -1,0 +1,107 @@
+---
+title: "LCI_2014to2017"
+author: "Andy Barclay"
+date: "July 25, 2018"
+output: html_document
+---
+The [2014-2016 LCI Chinook harvest analysis](V:/Analysis/2_Central/Chinook/Lower Cook Inlet/2016/Mixture/Sport Harvest 2014to2016) (for CSRI) of 4 reorting groups (OutsideCI,Kenai, Susitna, CIother) was published as an RIR for the BOF meeting in fall of 2016.  However, harvest numbers through 2016 were not available at the time so stock specific harvests could not be estimated. Addtionally, samples for the late UCI stratum were still being collected at the time of the analysis, so not all strata were represented.  PSMFC funded this project for 2017 and with that study we decided to use finer-scale reporting groups ("Outside_CI","WestSusitna","KnikTurnagain","Kenai","SKenaiPen"). The [analysis of the 2017 harvest](V:/Analysis/2_Central/Chinook/Lower Cook Inlet/LCI_2017) samples is in LCI_2017.Rmd  This R markdown file brings in results from all years (2014-2017) to produce esimtates using the 5 fine-scale reporting groups for including in a fishery manuscript MSA report.
+
+##Set up workspace
+###Get functions and load tidy packages
+```{r workspace setup, echo=TRUE}
+
+source("C:\\Users\\awbarclay\\Documents\\R\\GitHubCloneFunctions.R")#GCL functions
+source("V:\\Analysis\\Staff\\Andy Barclay\\R\\New Functions\\WorkspaceFolders.GCL.R")#A function I wrote
+
+library("tidyverse")
+
+```
+
+###Create output folders 
+```{r create folders, echo=TRUE, message=FALSE}
+#WorkspaceFolders.GCL(Folders=c("Output","objects"),wd=getwd())
+
+```
+
+###Create objects for producing estimates
+```{r analysis objects}
+
+groups<- c("Outside_CI","WestSusitna","KnikTurnagain","Kenai","SKenaiPen")
+
+groupvec <- c(rep(1,63),rep(2,29),rep(3,8),rep(4,12),rep(5,6),rep(1,93))
+
+grcol <- set_names(c("blue","forestgreen","orange","cyan","red"),groups)
+
+```
+
+###Get BAYES results for the 5 reporting groups
+```{r BAYES results}
+#2014-2016
+Outputdir2014to2016 <-"V:/Analysis/2_Central/Chinook/Lower Cook Inlet/2016/Mixture/Sport Harvest 2014to2016/BAYES/Output"
+mixvec2014to2016<-c("E14","E15","E16","L16","S14","S15","S16","W14","W15","W16") 
+
+
+BAYES_results2014to2016 <- CustomCombineBAYESOutput.GCL(groupvec=groupvec, groupnames=groups, maindir=Outputdir2014to2016, mixvec=mixvec2014to2016, prior = "", 
+    ext = "bot", nchains = 4, burn = 0.5, alpha = 0.1, PosteriorOutput = FALSE, 
+    threshhold = 5e-07) %>% 
+  set_names(c("UCI_Early_2014","UCI_Early_2015","UCI_Early_2016","UCI_Late_2016","LCI_Summer_2014","LCI_Summer_2015","LCI_Summer_2016","LCI_Winter_2014","LCI_Winter_2015","LCI_Winter_2016"))
+
+#2017
+Outputdir2017 <-"V:/Analysis/2_Central/Chinook/Lower Cook Inlet/LCI_2017/bayes/output"
+mixvec2017 <- list.files(Outputdir2017)
+
+BAYES_results2017 <- CustomCombineBAYESOutput.GCL(groupvec=groupvec, groupnames=groups, maindir=Outputdir2017, mixvec=mixvec2017, prior = "", 
+    ext = "bot", nchains = 4, burn = 0.5, alpha = 0.1, PosteriorOutput = FALSE, 
+    threshhold = 5e-07) %>% 
+  set_names(c("LCI_Summer_2017","LCI_Winter_2017","UCI_Early_2017","UCI_Late_2017"))
+
+```
+```{r combine results from all years}
+
+All_BAYES_results<-bind_rows(
+  lapply(names(BAYES_results2014to2016),function(mix){as_tibble(BAYES_results2014to2016[[mix]])})%>%
+              set_names(names(BAYES_results2014to2016)) %>% 
+  bind_rows(.id="mixture_collection") %>% 
+  set_names(c("mixture_collection","mean","sd","median","lo5CI","hi95CI","P0","GR")) %>% 
+  mutate(repunit=factor(rep(groups,length(BAYES_results2014to2016)),levels=groups)),
+  
+  lapply(names(BAYES_results2017),function(mix){as_tibble(BAYES_results2017[[mix]])})%>%
+              set_names(names(BAYES_results2017)) %>% 
+  bind_rows(.id="mixture_collection") %>% 
+  set_names(c("mixture_collection","mean","sd","median","lo5CI","hi95CI","P0","GR")) %>% 
+  mutate(repunit=factor(rep(groups,length(BAYES_results2017)),levels=groups))
+  
+) %>% 
+  separate(col=mixture_collection,into=c("fishery","drop","year"),sep =c(-5,-4))%>% 
+  select(fishery,year,repunit,mean,lo5CI,hi95CI,sd,median) %>% 
+  mutate(fishery=factor(fishery,levels=c("UCI_Early","UCI_Late","LCI_Summer","LCI_Winter")))
+
+```
+###Plot stock composition results
+```{r stock comp plots, message=FALSE, fig.height=10, fig.width=8}
+
+All_BAYES_results%>% 
+  ggplot(aes(x=repunit, y = mean, fill =repunit)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  geom_bar(stat="identity",position = "dodge") +
+  geom_errorbar(aes(ymin = lo5CI, ymax = hi95CI, width = 0.3), position = "dodge")+
+  scale_fill_manual(name = "Reporting Group", values = grcol) +
+  facet_grid(year~fishery,drop=FALSE) +
+  ylab("Proportion")+
+  xlab("Reporting Group")+
+  ggtitle(label="2014-2017 Cook Inlet Marine Sport Harvest Compostion",subtitle = "5 reporting groups")
+
+ggsave(filename = "Output/2017 Cook Inlet Marine sport fishery Chinook salmon harvest compostions_MCMCvsPB.pdf",device="pdf")
+```
+###Get harvsts numbers
+****NOTE: these need to be checked by Homer staff.  Also, I used the average of 2014-2016 for the 2017 LCI_Winter harvest, need SWHS estimate***
+```{r harvests,message="hide",results=FALSE}
+
+harvests<-read_csv(file="data/Harvests2014_2017.csv") %>% 
+  gather(key="fishery",value="harvest",-year)
+
+```
+
+
+
+
